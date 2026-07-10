@@ -18,7 +18,7 @@ import requests
 from datetime import datetime
 
 # ============== CONFIG ==============
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8755429728:AAFFr8--kOp7S1QDlQKrGz0w6Dp-zFenB40")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "PASTE_YOUR_BOT_TOKEN_HERE_FROM_BOTFATHER")
 CONFIG_FILE = "bot_config.json"
 FRONTEND_BASE_URL = "https://genuine-semolina-20c346.netlify.app/?id="
 JSONBIN_API = "https://api.jsonbin.io/v3/b"
