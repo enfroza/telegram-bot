@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Telegram Bot - PocketBase Version (Full Features + Fixed Auth)
+Telegram Bot - SQLite Version (Full Features)
 """
 
 import os
 import json
 import time
 import logging
+import sqlite3
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
@@ -15,12 +16,9 @@ load_dotenv()
 
 # ============== CONFIG ==============
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-POCKETBASE_URL = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
-POCKETBASE_ADMIN_EMAIL = os.getenv("POCKETBASE_ADMIN_EMAIL")
-POCKETBASE_ADMIN_PASSWORD = os.getenv("POCKETBASE_ADMIN_PASSWORD")
-
 CONFIG_FILE = "bot_config.json"
 FRONTEND_BASE_URL = "https://genuine-semolina-20c346.netlify.app/?id="
+DB_FILE = "unlock.db"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("unlock-bot")
@@ -48,44 +46,38 @@ DEFAULT_TEMPLATE = {
     }
 }
 
-# ============== POCKETBASE HELPERS (FIXED) ==============
-def get_pb_token():
-    try:
-        # ✅ Fixed for PocketBase v0.20+
-        r = requests.post(f"{POCKETBASE_URL}/api/superusers/auth-with-password", json={
-            "identity": POCKETBASE_ADMIN_EMAIL,
-            "password": POCKETBASE_ADMIN_PASSWORD
-        }, timeout=10)
-        return r.json().get("token") if r.status_code == 200 else None
-    except:
-        return None
+# ============== SQLITE HELPERS ==============
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS unlock_configs
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  openLinkUrl TEXT,
+                  unlockUrl TEXT,
+                  data TEXT,
+                  created_at TEXT)''')
+    conn.commit()
+    conn.close()
 
-def pb_create_record(data):
-    token = get_pb_token()
-    if not token:
-        return False, None, None, "PocketBase auth failed"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    r = requests.post(f"{POCKETBASE_URL}/api/collections/unlock_configs/records", json=data, headers=headers, timeout=15)
-    if r.status_code == 200:
-        record = r.json()
-        return True, record.get("id"), f"{FRONTEND_BASE_URL}{record.get('id')}", None
-    return False, None, None, r.text
+def create_record(data):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO unlock_configs (openLinkUrl, unlockUrl, data, created_at) VALUES (?, ?, ?, ?)",
+              (data.get("openLinkUrl", ""), data.get("unlockUrl", ""), json.dumps(data), datetime.now().isoformat()))
+    record_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return True, record_id, f"{FRONTEND_BASE_URL}{record_id}", None
 
-def pb_update_record(record_id, data):
-    token = get_pb_token()
-    if not token:
-        return False, "PocketBase auth failed"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    r = requests.patch(f"{POCKETBASE_URL}/api/collections/unlock_configs/records/{record_id}", json=data, headers=headers, timeout=15)
-    return r.status_code == 200, r.text
-
-def pb_get_record(record_id):
-    token = get_pb_token()
-    if not token:
-        return False, None
-    headers = {"Authorization": f"Bearer {token}"}
-    r = requests.get(f"{POCKETBASE_URL}/api/collections/unlock_configs/records/{record_id}", headers=headers, timeout=10)
-    return r.status_code == 200, r.json() if r.status_code == 200 else None
+def get_record(record_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT data FROM unlock_configs WHERE id = ?", (record_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return True, json.loads(row[0])
+    return False, None
 
 # ============== CONFIG HELPERS ==============
 def load_config():
@@ -241,7 +233,7 @@ def handle_callback_query(cb):
             final_data["openLinkUrl"] = d.get("openLinkUrl", "")
             final_data["unlockUrl"] = d.get("unlockUrl", "")
 
-            ok, bin_id, link, err = pb_create_record(final_data)
+            ok, bin_id, link, err = create_record(final_data)
             if ok:
                 add_to_my_bins(bin_id, d.get("bin_name", "Unlock Config"), link)
                 if d.get("openLinkUrl"):
@@ -278,11 +270,12 @@ def handle_text_message(chat_id, user_id, text):
 
 # ============== MAIN ==============
 def main():
-    if not BOT_TOKEN or not POCKETBASE_ADMIN_EMAIL:
-        print("❌ Please set credentials in .env")
+    init_db()
+    if not BOT_TOKEN:
+        print("❌ Please set TELEGRAM_BOT_TOKEN in .env")
         return
 
-    print("🚀 PocketBase Unlock Manager Bot started!")
+    print("🚀 SQLite Unlock Manager Bot started!")
 
     offset = None
     while True:
